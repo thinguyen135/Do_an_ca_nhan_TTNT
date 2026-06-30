@@ -1600,6 +1600,487 @@ def greedy_search(initial_state):
     return None
 
 
+# ===================== ADVERSARIAL SEARCH =====================
+#
+# 8-puzzle là bài toán một tác tử, nhưng có thể minh họa nhóm thuật toán
+# đối kháng bằng cách xem cây trạng thái như một game:
+#   - MAX chọn nước đi làm puzzle gần goal hơn.
+#   - MIN chọn nước đi làm puzzle xa goal hơn.
+#   - CHANCE trong Expectimax chọn ngẫu nhiên đều giữa các nước đi.
+# Utility càng lớn càng tốt cho MAX.
+
+ADVERSARIAL_ALGORITHMS = ["Minimax", "Alpha-Beta", "Expectimax"]
+ADVERSARIAL_DEPTH_LIMIT = 5
+
+
+def adversarial_utility(state):
+    if goal_test(state):
+        return 1000
+    return -manhattan_distance(state)
+
+
+def format_adversarial_value(value):
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:.2f}"
+    return str(int(value))
+
+
+def is_adversarial_algorithm(algorithm):
+    return algorithm in ADVERSARIAL_ALGORITHMS
+
+
+def adversarial_actor_for_step(algorithm, step_index):
+    if step_index % 2 == 1:
+        return "MAX"
+    if algorithm == "Expectimax":
+        return "CHANCE"
+    return "MIN"
+
+
+def _adversarial_actions(state, path_states, maximizing=None):
+    actions = []
+
+    for action in valid_actions(state):
+        next_state, _ = swap(state, action)
+        if next_state not in path_states:
+            actions.append(action)
+
+    if maximizing is not None:
+        actions.sort(
+            key=lambda action: adversarial_utility(swap(state, action)[0]),
+            reverse=maximizing
+        )
+
+    return actions
+
+
+def _adversarial_child(state, action):
+    next_state, _ = swap(state, action)
+    swapped_tile = state[next_state.index(0)]
+    return next_state, swapped_tile
+
+
+def _line_to_solution(initial_state, line, root_value):
+    root_node = Node(
+        state=initial_state,
+        cost=root_value
+    )
+    current = root_node
+
+    for action, state, value in line:
+        current = Node(
+            state=state,
+            parent=current,
+            action=action,
+            step=current.step + 1,
+            cost=value
+        )
+
+    return solution(current)
+
+
+def _append_adversarial_path_logs(logs, algorithm, line, root_value):
+    logs.append("\n=== ĐƯỜNG ĐI MINH HỌA ĐƯỢC CHỌN ===")
+    logs.append(f"V(root) = {format_adversarial_value(root_value)}")
+
+    if not line:
+        logs.append("Initial state đã là trạng thái kết thúc.")
+        return
+
+    for index, (action, state, value) in enumerate(line, start=1):
+        actor = adversarial_actor_for_step(algorithm, index)
+        logs.append(
+            f"Step {index}: {actor} chọn {action} | "
+            f"V = {format_adversarial_value(value)} | "
+            f"Utility(state) = {adversarial_utility(state)} | "
+            f"{format_log_state(state)}"
+        )
+
+
+def _minimax_value(state, depth, maximizing, path_states, logs, level=0):
+    indent = "  " * level
+    role = "MAX" if maximizing else "MIN"
+    value_now = adversarial_utility(state)
+
+    logs.append(
+        f"{indent}{role} node | depth còn lại = {depth} | "
+        f"utility = {value_now} | {format_log_state(state)}"
+    )
+
+    if depth == 0 or goal_test(state):
+        logs.append(f"{indent}-> Trả utility = {value_now}")
+        return value_now, []
+
+    actions = _adversarial_actions(state, path_states)
+    if not actions:
+        logs.append(f"{indent}-> Không còn nước đi không lặp, trả utility = {value_now}")
+        return value_now, []
+
+    if maximizing:
+        best_value = float("-inf")
+        best_step = None
+        best_line = []
+
+        for action in actions:
+            child_state, swapped_tile = _adversarial_child(state, action)
+            logs.append(f"{indent}  MAX thử {action} (đổi 0 với {swapped_tile})")
+
+            path_states.add(child_state)
+            child_value, child_line = _minimax_value(
+                child_state,
+                depth - 1,
+                False,
+                path_states,
+                logs,
+                level + 1
+            )
+            path_states.remove(child_state)
+
+            logs.append(
+                f"{indent}  -> {action} có value = "
+                f"{format_adversarial_value(child_value)}"
+            )
+
+            if child_value > best_value:
+                best_value = child_value
+                best_step = (action, child_state, child_value)
+                best_line = child_line
+
+        logs.append(
+            f"{indent}=> MAX chọn {best_step[0]} với value = "
+            f"{format_adversarial_value(best_value)}"
+        )
+        return best_value, [best_step] + best_line
+
+    best_value = float("inf")
+    best_step = None
+    best_line = []
+
+    for action in actions:
+        child_state, swapped_tile = _adversarial_child(state, action)
+        logs.append(f"{indent}  MIN thử {action} (đổi 0 với {swapped_tile})")
+
+        path_states.add(child_state)
+        child_value, child_line = _minimax_value(
+            child_state,
+            depth - 1,
+            True,
+            path_states,
+            logs,
+            level + 1
+        )
+        path_states.remove(child_state)
+
+        logs.append(
+            f"{indent}  -> {action} có value = "
+            f"{format_adversarial_value(child_value)}"
+        )
+
+        if child_value < best_value:
+            best_value = child_value
+            best_step = (action, child_state, child_value)
+            best_line = child_line
+
+    logs.append(
+        f"{indent}=> MIN chọn {best_step[0]} với value = "
+        f"{format_adversarial_value(best_value)}"
+    )
+    return best_value, [best_step] + best_line
+
+
+def minimax_8puzzle(initial_state, depth_limit=ADVERSARIAL_DEPTH_LIMIT):
+    logs = [
+        "=== MINIMAX SEARCH LOG ===",
+        "Mô hình đối kháng trên cây trạng thái 8-puzzle:",
+        "  MAX: chọn nước đi làm Manhattan distance nhỏ hơn.",
+        "  MIN: chọn nước đi làm Manhattan distance lớn hơn.",
+        "  Utility(state) = 1000 nếu goal, ngược lại = -Manhattan distance.",
+        f"Depth limit = {depth_limit}",
+        f"Initial State: {format_log_state(initial_state)}",
+        f"Utility(Start) = {adversarial_utility(initial_state)}",
+        ""
+    ]
+
+    root_value, line = _minimax_value(
+        initial_state,
+        depth_limit,
+        True,
+        {initial_state},
+        logs
+    )
+    _append_adversarial_path_logs(logs, "Minimax", line, root_value)
+
+    steps, states, costs = _line_to_solution(initial_state, line, root_value)
+    return steps, states, costs, logs
+
+
+def _alpha_beta_value(state, depth, alpha, beta, maximizing, path_states, logs, level=0):
+    indent = "  " * level
+    role = "MAX" if maximizing else "MIN"
+    value_now = adversarial_utility(state)
+
+    logs.append(
+        f"{indent}{role} node | depth còn lại = {depth} | "
+        f"alpha = {format_adversarial_value(alpha)} | "
+        f"beta = {format_adversarial_value(beta)} | "
+        f"utility = {value_now} | {format_log_state(state)}"
+    )
+
+    if depth == 0 or goal_test(state):
+        logs.append(f"{indent}-> Trả utility = {value_now}")
+        return value_now, []
+
+    actions = _adversarial_actions(state, path_states, maximizing=maximizing)
+    if not actions:
+        logs.append(f"{indent}-> Không còn nước đi không lặp, trả utility = {value_now}")
+        return value_now, []
+
+    if maximizing:
+        best_value = float("-inf")
+        best_step = None
+        best_line = []
+
+        for action in actions:
+            child_state, swapped_tile = _adversarial_child(state, action)
+            logs.append(f"{indent}  MAX thử {action} (đổi 0 với {swapped_tile})")
+
+            path_states.add(child_state)
+            child_value, child_line = _alpha_beta_value(
+                child_state,
+                depth - 1,
+                alpha,
+                beta,
+                False,
+                path_states,
+                logs,
+                level + 1
+            )
+            path_states.remove(child_state)
+
+            if child_value > best_value:
+                best_value = child_value
+                best_step = (action, child_state, child_value)
+                best_line = child_line
+
+            alpha = max(alpha, best_value)
+            logs.append(
+                f"{indent}  -> value = {format_adversarial_value(child_value)}, "
+                f"alpha = {format_adversarial_value(alpha)}, "
+                f"beta = {format_adversarial_value(beta)}"
+            )
+
+            if alpha >= beta:
+                logs.append(f"{indent}  -> Cắt tỉa beta: alpha >= beta.")
+                break
+
+        logs.append(
+            f"{indent}=> MAX chọn {best_step[0]} với value = "
+            f"{format_adversarial_value(best_value)}"
+        )
+        return best_value, [best_step] + best_line
+
+    best_value = float("inf")
+    best_step = None
+    best_line = []
+
+    for action in actions:
+        child_state, swapped_tile = _adversarial_child(state, action)
+        logs.append(f"{indent}  MIN thử {action} (đổi 0 với {swapped_tile})")
+
+        path_states.add(child_state)
+        child_value, child_line = _alpha_beta_value(
+            child_state,
+            depth - 1,
+            alpha,
+            beta,
+            True,
+            path_states,
+            logs,
+            level + 1
+        )
+        path_states.remove(child_state)
+
+        if child_value < best_value:
+            best_value = child_value
+            best_step = (action, child_state, child_value)
+            best_line = child_line
+
+        beta = min(beta, best_value)
+        logs.append(
+            f"{indent}  -> value = {format_adversarial_value(child_value)}, "
+            f"alpha = {format_adversarial_value(alpha)}, "
+            f"beta = {format_adversarial_value(beta)}"
+        )
+
+        if alpha >= beta:
+            logs.append(f"{indent}  -> Cắt tỉa alpha: alpha >= beta.")
+            break
+
+    logs.append(
+        f"{indent}=> MIN chọn {best_step[0]} với value = "
+        f"{format_adversarial_value(best_value)}"
+    )
+    return best_value, [best_step] + best_line
+
+
+def alpha_beta_8puzzle(initial_state, depth_limit=ADVERSARIAL_DEPTH_LIMIT):
+    logs = [
+        "=== ALPHA-BETA SEARCH LOG ===",
+        "Alpha-Beta = Minimax có cắt tỉa bằng alpha và beta.",
+        "Mô hình đối kháng trên cây trạng thái 8-puzzle:",
+        "  MAX: chọn nước đi làm Manhattan distance nhỏ hơn.",
+        "  MIN: chọn nước đi làm Manhattan distance lớn hơn.",
+        "  Utility(state) = 1000 nếu goal, ngược lại = -Manhattan distance.",
+        f"Depth limit = {depth_limit}",
+        f"Initial State: {format_log_state(initial_state)}",
+        f"Utility(Start) = {adversarial_utility(initial_state)}",
+        ""
+    ]
+
+    root_value, line = _alpha_beta_value(
+        initial_state,
+        depth_limit,
+        float("-inf"),
+        float("inf"),
+        True,
+        {initial_state},
+        logs
+    )
+    _append_adversarial_path_logs(logs, "Alpha-Beta", line, root_value)
+
+    steps, states, costs = _line_to_solution(initial_state, line, root_value)
+    return steps, states, costs, logs
+
+
+def _expectimax_value(state, depth, maximizing, path_states, logs, level=0):
+    indent = "  " * level
+    role = "MAX" if maximizing else "CHANCE"
+    value_now = adversarial_utility(state)
+
+    logs.append(
+        f"{indent}{role} node | depth còn lại = {depth} | "
+        f"utility = {value_now} | {format_log_state(state)}"
+    )
+
+    if depth == 0 or goal_test(state):
+        logs.append(f"{indent}-> Trả utility = {value_now}")
+        return value_now, []
+
+    actions = _adversarial_actions(
+        state,
+        path_states,
+        maximizing=True if maximizing else None
+    )
+    if not actions:
+        logs.append(f"{indent}-> Không còn nước đi không lặp, trả utility = {value_now}")
+        return value_now, []
+
+    if maximizing:
+        best_value = float("-inf")
+        best_step = None
+        best_line = []
+
+        for action in actions:
+            child_state, swapped_tile = _adversarial_child(state, action)
+            logs.append(f"{indent}  MAX thử {action} (đổi 0 với {swapped_tile})")
+
+            path_states.add(child_state)
+            child_value, child_line = _expectimax_value(
+                child_state,
+                depth - 1,
+                False,
+                path_states,
+                logs,
+                level + 1
+            )
+            path_states.remove(child_state)
+
+            logs.append(
+                f"{indent}  -> {action} có expected value = "
+                f"{format_adversarial_value(child_value)}"
+            )
+
+            if child_value > best_value:
+                best_value = child_value
+                best_step = (action, child_state, child_value)
+                best_line = child_line
+
+        logs.append(
+            f"{indent}=> MAX chọn {best_step[0]} với expected value = "
+            f"{format_adversarial_value(best_value)}"
+        )
+        return best_value, [best_step] + best_line
+
+    candidates = []
+    total = 0
+    probability = 1 / len(actions)
+
+    for action in actions:
+        child_state, swapped_tile = _adversarial_child(state, action)
+        logs.append(
+            f"{indent}  CHANCE xét {action} (đổi 0 với {swapped_tile}), "
+            f"p = {probability:.2f}"
+        )
+
+        path_states.add(child_state)
+        child_value, child_line = _expectimax_value(
+            child_state,
+            depth - 1,
+            True,
+            path_states,
+            logs,
+            level + 1
+        )
+        path_states.remove(child_state)
+
+        total += probability * child_value
+        candidates.append((action, child_state, child_value, child_line))
+        logs.append(
+            f"{indent}  -> contribution = {probability:.2f} * "
+            f"{format_adversarial_value(child_value)}"
+        )
+
+    expected_value = total
+    chosen_action, chosen_state, chosen_value, chosen_line = min(
+        candidates,
+        key=lambda item: abs(item[2] - expected_value)
+    )
+
+    logs.append(
+        f"{indent}=> CHANCE trả kỳ vọng = "
+        f"{format_adversarial_value(expected_value)}; "
+        f"minh họa bằng nhánh {chosen_action}"
+    )
+
+    return expected_value, [(chosen_action, chosen_state, expected_value)] + chosen_line
+
+
+def expectimax_8puzzle(initial_state, depth_limit=ADVERSARIAL_DEPTH_LIMIT):
+    logs = [
+        "=== EXPECTIMAX SEARCH LOG ===",
+        "Mô hình Expectimax trên cây trạng thái 8-puzzle:",
+        "  MAX: chọn nước đi có expected value lớn nhất.",
+        "  CHANCE: chọn ngẫu nhiên đều giữa các nước đi hợp lệ.",
+        "  Utility(state) = 1000 nếu goal, ngược lại = -Manhattan distance.",
+        f"Depth limit = {depth_limit}",
+        f"Initial State: {format_log_state(initial_state)}",
+        f"Utility(Start) = {adversarial_utility(initial_state)}",
+        ""
+    ]
+
+    root_value, line = _expectimax_value(
+        initial_state,
+        depth_limit,
+        True,
+        {initial_state},
+        logs
+    )
+    _append_adversarial_path_logs(logs, "Expectimax", line, root_value)
+
+    steps, states, costs = _line_to_solution(initial_state, line, root_value)
+    return steps, states, costs, logs
+
+
 # ===================== RANDOM STATE =====================
 
 def generate_random_state():
@@ -1648,12 +2129,17 @@ class EightPuzzleApp:
                 "Forward Checking",
                 "AC-3",
                 "Min-Conflicts"
+            ],
+            "Thuật toán đối kháng": [
+                "Minimax",
+                "Alpha-Beta",
+                "Expectimax"
             ]
         }
 
         title = tk.Label(
             root,
-            text="8 Puzzle Solver: SEARCH - CSP - LOCAL SEARCH",
+            text="8 Puzzle Solver: SEARCH - CSP - LOCAL - ADVERSARIAL",
             font=("Arial", 18, "bold")
         )
         title.pack(pady=10)
@@ -1841,6 +2327,12 @@ class EightPuzzleApp:
             result = local_beam_search(self.current_state, k=2)
         elif algorithm == "Simulated Annealing":
             result = simulated_annealing(self.current_state, goal)
+        elif algorithm == "Minimax":
+            result = minimax_8puzzle(self.current_state)
+        elif algorithm == "Alpha-Beta":
+            result = alpha_beta_8puzzle(self.current_state)
+        elif algorithm == "Expectimax":
+            result = expectimax_8puzzle(self.current_state)
         elif algorithm == "Min-Conflicts":
             result = min_conflicts_8puzzle(self.current_state, max_steps=1000)
             if isinstance(result, tuple) and result[0] == "failure":
@@ -1952,6 +2444,12 @@ class EightPuzzleApp:
                 tk.END,
                 f"\nSố ô xung đột = {conflicts}"
             )
+        elif is_adversarial_algorithm(algorithm):
+            self.result_text.insert(
+                tk.END,
+                f"\nUtility(state) = {adversarial_utility(self.states[0])}"
+                f"\nV(root) = {format_adversarial_value(self.costs[0])}"
+            )
         self.result_text.insert(tk.END, "\n\n")
 
         for i in range(1, len(self.states)):
@@ -2033,6 +2531,14 @@ class EightPuzzleApp:
                     tk.END,
                     f"\nSố ô xung đột = {conflicts}"
                 )
+            if is_adversarial_algorithm(algorithm):
+                actor = adversarial_actor_for_step(algorithm, i)
+                self.result_text.insert(
+                    tk.END,
+                    f"\nNút = {actor}"
+                    f"\nUtility(state) = {adversarial_utility(self.states[i])}"
+                    f"\nGiá trị lan truyền = {format_adversarial_value(self.costs[i])}"
+                )
 
             self.result_text.insert(tk.END, "\n\n")
 
@@ -2042,15 +2548,17 @@ class EightPuzzleApp:
             self.result_text.insert(tk.END, "Dừng ở cực đại cục bộ, chưa tới trạng thái đích.\n")
         elif algorithm == "Simulated Annealing":
             self.result_text.insert(tk.END, "Dừng vì T <= Tmin, chưa tới trạng thái đích.\n")
+        elif is_adversarial_algorithm(algorithm):
+            self.result_text.insert(tk.END, "Dừng tại độ sâu giới hạn của thuật toán đối kháng.\n")
         else:
             self.result_text.insert(tk.END, "Chưa tới trạng thái đích.\n")
 
     def show_step(self):
+        algorithm = self.algorithm_box.get()
+
         if self.index < len(self.states):
             state = self.states[self.index]
             self.draw_board(state)
-
-            algorithm = self.algorithm_box.get()
 
             if self.index == 0:
                 self.info.config(
@@ -2081,6 +2589,23 @@ class EightPuzzleApp:
                         tk.END,
                         f"Step {self.index} Solution: {move}\n"
                         f"Số ô xung đột = {conflicts}\n"
+                        f"{format_state(current_state)}\n\n"
+                    )
+
+                elif is_adversarial_algorithm(algorithm):
+                    actor = adversarial_actor_for_step(algorithm, self.index)
+                    backed_up_value = format_adversarial_value(self.costs[self.index])
+                    state_utility = adversarial_utility(current_state)
+
+                    self.info.config(
+                        text=f"Step {self.index}/{len(self.steps)} | {actor}: {move} | V: {backed_up_value}"
+                    )
+
+                    self.log_text.insert(
+                        tk.END,
+                        f"Step {self.index} Solution: {actor} chọn {move}\n"
+                        f"Utility(state) = {state_utility}\n"
+                        f"Giá trị lan truyền = {backed_up_value}\n"
                         f"{format_state(current_state)}\n\n"
                     )
 
@@ -2210,6 +2735,8 @@ class EightPuzzleApp:
 
             if goal_test(self.current_state):
                 self.info.config(text="Đã giải xong!")
+            elif is_adversarial_algorithm(algorithm):
+                self.info.config(text="Đã chạy xong mô phỏng đối kháng.")
             elif algorithm == "Simulated Annealing":
                 self.info.config(text="Dừng vì T <= Tmin.")
             else:

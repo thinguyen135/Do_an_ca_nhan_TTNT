@@ -18,18 +18,7 @@ moves = {
     "Down": 3
 }
 
-# ===================== CSP ALGORITHMS =====================
-#
-# Trong 8-puzzle, bài toán CSP được mô hình hóa như sau:
-#   - Biến (Variables): 9 ô, mỗi ô là X0..X8
-#   - Miền giá trị (Domain): {0,1,2,3,4,5,6,7,8}
-#   - Ràng buộc (Constraints): mỗi ô có giá trị khác nhau (all-different)
-#     và kết quả xếp đặt khớp với goal state.
-# Trạng thái đích: goal = (1,2,3,4,5,6,7,8,0)
-# ----------------------------------------------------------------
 
-
-# ===================== MIN-CONFLICTS =====================
 def _count_conflicts_mc(state):
     return sum(1 for i in range(9) if state[i] != 0 and state[i] != goal[i])
 

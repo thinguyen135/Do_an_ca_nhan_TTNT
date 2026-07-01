@@ -30,550 +30,166 @@ moves = {
 
 
 # ===================== MIN-CONFLICTS =====================
-# function MIN-CONFLICTS(csp, max_steps) returns a solution or failure
-#   current <- an initial complete assignment for csp
-#   for i = 1 to max_steps do
-#       if current is a solution for csp then return current
-#       var <- a randomly chosen conflicted variable from csp.VARIABLES
-#       value <- the value v for var that minimizes CONFLICTS(var,v,current,csp)
-#       set var <- value in current
-#   return failure
-
 def _count_conflicts_mc(state):
-    """Đếm số vị trí bị xung đột (ô không đúng chỗ) trong 8-puzzle."""
-    return sum(
-        1
-        for i in range(9)
-        if state[i] is not None and state[i] != 0 and state[i] != goal[i]
-    )
-
-
-def _assignment_to_partial_state(assignment):
-    """Tạo state CSP đang gán dở; ô chưa gán để trống thay vì lấy từ initial_state."""
-    return tuple(assignment.get(i, None) for i in range(9))
-
-
-def _conflicts_for_var(position, value, state):
-    """
-    Đếm số xung đột nếu đặt 'value' vào 'position'.
-    Xung đột = giá trị khác với goal tại vị trí đó (ngoại trừ ô trống).
-    """
-    conflict = 0
-    if value != 0 and value != goal[position]:
-        conflict += 1
-    # Kiểm tra ô nào đang giữ value bị đẩy đi
-    for i in range(9):
-        if i != position and state[i] == value:
-            if value != 0 and value != goal[i]:
-                conflict += 1
-    return conflict
-
+    return sum(1 for i in range(9) if state[i] != 0 and state[i] != goal[i])
 
 def min_conflicts_8puzzle(initial_state, max_steps=1000):
-    """
-    MIN-CONFLICTS cho 8-puzzle.
-    Khởi tạo bằng trạng thái ban đầu, mỗi bước chọn ngẫu nhiên
-    một biến bị xung đột rồi gán giá trị giảm xung đột nhất.
-    """
     logs = []
     logs.append("=== MIN-CONFLICTS SEARCH LOG ===")
     logs.append(f"max_steps = {max_steps}")
-    logs.append("Mô hình CSP:")
-    logs.append("  Variables: X0..X8 (9 ô)")
-    logs.append("  Domain: {0,1,2,3,4,5,6,7,8} (mỗi biến)")
-    logs.append("  Constraints: all-different + khớp goal")
-    logs.append(f"Initial State: {initial_state}")
-
-    # current = trạng thái ban đầu (đã là gán đầy đủ)
-    current = list(initial_state)
-
-    # Tạo node gốc để theo dõi đường đi
-    root_node = Node(tuple(current))
-    path_nodes = [root_node]   # danh sách node theo bước
-
+    
+    current_node = Node(initial_state)
+    path_nodes = [current_node]
+    
     for i in range(1, max_steps + 1):
-        state_tuple = tuple(current)
-
         logs.append(f"\n--- Bước {i} ---")
-        logs.append(f"current = {state_tuple}")
-        conflicts_now = _count_conflicts_mc(state_tuple)
-        logs.append(f"Số ô xung đột = {conflicts_now}")
-
-        # Kiểm tra goal
-        if state_tuple == goal:
+        conflicts_now = _count_conflicts_mc(current_node.state)
+        logs.append(f"Số ô sai = {conflicts_now}")
+        
+        if goal_test(current_node.state):
             logs.append("=> Tìm thấy trạng thái đích!")
-            # Xây dựng chuỗi node
-            steps_out, states_out, costs_out = [], [], []
-            for nd in path_nodes:
-                states_out.append(nd.state)
-                costs_out.append(0)
-            for j in range(1, len(path_nodes)):
-                steps_out.append("Min-Conflicts Move")
-            return steps_out, states_out, costs_out, logs
-
-        # Chọn ngẫu nhiên một biến bị xung đột
-        conflicted = [pos for pos in range(9)
-                      if current[pos] != 0 and current[pos] != goal[pos]]
-        if not conflicted:
-            # Chỉ ô trống bị sai, hoán đổi trực tiếp
-            conflicted = [pos for pos in range(9) if current[pos] != goal[pos]]
-
-        var = random.choice(conflicted)
-        logs.append(f"var (ô xung đột được chọn) = vị trí {var}, giá trị = {current[var]}")
-
-        # Tìm giá trị giảm xung đột nhất trong domain (0..8)
-        # Domain còn lại = các giá trị chưa dùng + giá trị hiện tại
-        used = set(current)
-        domain = list(range(9))
-        best_value = current[var]
+            steps, states, costs = solution(current_node)
+            return steps, states, costs, logs
+            
+        best_child = None
         best_conflict = float('inf')
-
-        for v in domain:
-            # Thử gán v vào var
-            old_val = current[var]
-            # Tìm vị trí đang chứa v (nếu có)
-            other_pos = None
-            for k in range(9):
-                if k != var and current[k] == v:
-                    other_pos = k
-                    break
-            if other_pos is not None:
-                current[var], current[other_pos] = v, old_val
-                c = _count_conflicts_mc(tuple(current))
-                current[var], current[other_pos] = old_val, v
-            else:
-                current[var] = v
-                c = _count_conflicts_mc(tuple(current))
-                current[var] = old_val
-
-            logs.append(f"  Thử value = {v} => conflicts = {c}")
+        
+        actions = valid_actions(current_node.state)
+        import random
+        random.shuffle(actions)
+        
+        for action in actions:
+            child = child_node(current_node, action)
+            c = _count_conflicts_mc(child.state)
             if c < best_conflict:
                 best_conflict = c
-                best_value = v
-
-        logs.append(f"=> Chọn value = {best_value} (conflicts = {best_conflict})")
-
-        # Thực hiện gán: hoán đổi nếu cần
-        old_val = current[var]
-        if best_value != old_val:
-            other_pos = None
-            for k in range(9):
-                if k != var and current[k] == best_value:
-                    other_pos = k
-                    break
-            if other_pos is not None:
-                current[var], current[other_pos] = best_value, old_val
-            else:
-                current[var] = best_value
-
-        new_node = Node(
-            state=tuple(current),
-            parent=path_nodes[-1],
-            action="Min-Conflicts Move",
-            step=i,
-            cost=0
-        )
-        path_nodes.append(new_node)
-
+                best_child = child
+                
+        logs.append(f"Chọn action {best_child.action} với conflicts = {best_conflict}")
+        current_node = best_child
+        path_nodes.append(current_node)
+        
     logs.append("\n=> Đã hết max_steps, không tìm được lời giải.")
-    logs.append("=> MIN-CONFLICTS thất bại.")
     return "failure", [], [], logs
 
-
 # ===================== BACKTRACKING =====================
-# function BACKTRACKING-SEARCH(csp) returns a solution, or failure
-#   return RECURSIVE-BACKTRACKING({}, csp)
-#
-# function RECURSIVE-BACKTRACKING(assignment, csp)
-#   if assignment is complete then return assignment
-#   var <- SELECT-UNASSIGNED-VARIABLE(Variables[csp], assignment, csp)
-#   for each value in ORDER-DOMAIN-VALUES(var, assignment, csp) do
-#       if value is consistent with assignment according to Constraints[csp] then
-#           add {var=value} to assignment
-#           result <- RECURSIVE-BACKTRACKING(assignment, csp)
-#           if result != failure then return result
-#           remove {var=value} from assignment
-#   return failure
-
-def _is_consistent_bt(assignment, var, value):
-    """
-    Kiểm tra gán var=value có nhất quán không:
-    - Không trùng giá trị với biến đã gán (all-different)
-    """
-    for assigned_var, assigned_val in assignment.items():
-        if assigned_val == value:
-            return False
-    return True
-
-
-def _recursive_backtracking(assignment, variables, logs, call_count, states_out, steps_out):
-    """Hàm đệ quy RECURSIVE-BACKTRACKING."""
-    call_count[0] += 1
-    depth = len(assignment)
-    indent = "  " * depth
-
-    # Kiểm tra gán đầy đủ
-    if len(assignment) == 9:
-        # Tạo state từ assignment
-        state = tuple(assignment[i] for i in range(9))
-        logs.append(f"{indent}=> Assignment đầy đủ: {state}")
-        if state == goal:
-            logs.append(f"{indent}=> Đây là GOAL STATE!")
-            return assignment
-        else:
-            logs.append(f"{indent}=> Không phải goal, backtrack.")
-            return None
-
-    # SELECT-UNASSIGNED-VARIABLE: chọn biến chưa gán theo thứ tự
-    var = None
-    for v in variables:
-        if v not in assignment:
-            var = v
-            break
-
-    logs.append(f"{indent}Chọn biến X{var} (vị trí {var})")
-    logs.append(f"{indent}Goal yêu cầu giá trị = {goal[var]}")
-
-    # ORDER-DOMAIN-VALUES: ưu tiên goal[var] trước
-    domain = list(range(9))
-    domain.sort(key=lambda v: (0 if v == goal[var] else 1))
-
-    for value in domain:
-        logs.append(f"{indent}  Thử X{var} = {value}")
-
-        if _is_consistent_bt(assignment, var, value):
-            logs.append(f"{indent}  => Nhất quán, thêm vào assignment")
-            assignment[var] = value
-
-            # --- Ghi nhận trạng thái cho animation ---
-            states_out.append(_assignment_to_partial_state(assignment))
-            steps_out.append(f"Assign X{var}={value}")
-
-            result = _recursive_backtracking(assignment, variables, logs, call_count, states_out, steps_out)
-
-            if result is not None:
-                return result
-
-            logs.append(f"{indent}  => Backtrack: X{var} = {value} không dẫn đến goal")
-            del assignment[var]
-
-            # --- Ghi nhận trạng thái backtrack cho animation ---
-            states_out.append(_assignment_to_partial_state(assignment))
-            steps_out.append(f"Backtrack X{var}")
-        else:
-            logs.append(f"{indent}  => Không nhất quán (trùng giá trị), bỏ qua")
-
-    return None
-
-
-def backtracking_8puzzle(initial_state):
-    """
-    BACKTRACKING-SEARCH cho 8-puzzle.
-    Xây dựng lại goal state từ đầu bằng backtracking trên CSP.
-    """
+def backtracking_8puzzle(initial_state, max_depth=50):
     logs = []
     logs.append("=== BACKTRACKING SEARCH LOG ===")
-    logs.append("Mô hình CSP:")
-    logs.append("  Variables: X0..X8 (9 ô)")
-    logs.append("  Domain: {0,1,2,3,4,5,6,7,8} (mỗi biến)")
-    logs.append("  Constraints: all-different + kết quả = goal")
-    logs.append(f"  Goal: {goal}")
-    logs.append(f"Initial State (start): {initial_state}")
-    logs.append("")
-    logs.append("Bắt đầu RECURSIVE-BACKTRACKING({}, csp):")
-
-    variables = list(range(9))
-    assignment = {}
-    call_count = [0]
-
-    states_out = [initial_state]
-    steps_out = []
-
-    result = _recursive_backtracking(assignment, variables, logs, call_count, states_out, steps_out)
-
-    logs.append(f"\nTổng số lần gọi đệ quy: {call_count[0]}")
-
-    if result is not None:
-        state_solution = tuple(result[i] for i in range(9))
-        logs.append(f"\n=> Tìm được assignment: {state_solution}")
-
-        costs_out = [0] * len(states_out)
-        return steps_out, states_out, costs_out, logs
-    else:
-        logs.append("=> BACKTRACKING thất bại.")
-        return "failure", [], [], logs
-
+    logs.append("Duyệt không gian trạng thái bằng Backtracking (DFS).")
+    
+    for limit in range(1, max_depth + 1):
+        result = depth_limited_search(initial_state, limit)
+        if isinstance(result, tuple) and len(result) == 4:
+            steps, states, costs, dls_logs = result
+            logs.extend(dls_logs)
+            return steps, states, costs, logs
+            
+        status, res_logs = result
+        logs.extend(res_logs)
+        if status != "cutoff":
+            break
+            
+    logs.append("=> BACKTRACKING thất bại.")
+    return "failure", [], [], logs
 
 # ===================== FORWARD CHECKING =====================
-# function FORWARD-CHECKING-SEARCH(csp) returns a solution, or failure
-#   return FORWARD-CHECK({}, csp)
-#
-# function FORWARD-CHECK(assignment, csp)
-#   if assignment is complete then return assignment
-#   var <- SELECT-UNASSIGNED-VARIABLE(csp)
-#   for each value in ORDER-DOMAIN-VALUES(var, assignment, csp) do
-#       if value is consistent with assignment then
-#           add {var=value} to assignment
-#           removed <- FORWARD-CHECKING(csp, var, value)
-#           if removed != failure then
-#               result <- FORWARD-CHECK(assignment, csp)
-#               if result != failure then return result
-#           restore removed values to domains
-#           remove {var=value} from assignment
-#   return failure
-
-def _forward_checking_prune(domains, var, value, assignment):
-    """
-    FORWARD-CHECKING: loại bỏ value đã dùng khỏi domain các biến chưa gán.
-    Trả về dict {neighbor: [removed_values]} hoặc None nếu domain rỗng.
-    """
-    removed = {}
-    for other_var in range(9):
-        if other_var != var and other_var not in assignment:
-            if value in domains[other_var]:
-                if other_var not in removed:
-                    removed[other_var] = []
-                removed[other_var].append(value)
-                domains[other_var].remove(value)
-                if len(domains[other_var]) == 0:
-                    return None  # Domain rỗng -> failure
-    return removed
-
-
-def _forward_check_recursive(assignment, domains, variables, logs, call_count, states_out, steps_out):
-    """Hàm đệ quy FORWARD-CHECK."""
-    call_count[0] += 1
-    depth = len(assignment)
-    indent = "  " * depth
-
-    if len(assignment) == 9:
-        state = tuple(assignment[i] for i in range(9))
-        logs.append(f"{indent}=> Assignment đầy đủ: {state}")
-        if state == goal:
-            logs.append(f"{indent}=> GOAL STATE!")
-            return assignment
-        else:
-            logs.append(f"{indent}=> Không phải goal, backtrack.")
-            return None
-
-    # SELECT-UNASSIGNED-VARIABLE (MRV: chọn biến có domain nhỏ nhất)
-    var = min(
-        [v for v in variables if v not in assignment],
-        key=lambda v: len(domains[v])
-    )
-    logs.append(f"{indent}Chọn biến X{var} | Domain = {sorted(domains[var])} | Goal yêu cầu = {goal[var]}")
-
-    # ORDER-DOMAIN-VALUES: ưu tiên goal[var]
-    ordered_vals = sorted(domains[var], key=lambda v: (0 if v == goal[var] else 1))
-
-    for value in ordered_vals:
-        logs.append(f"{indent}  Thử X{var} = {value}")
-
-        # Kiểm tra nhất quán
-        consistent = all(assignment[av] != value for av in assignment)
-        if not consistent:
-            logs.append(f"{indent}  => Không nhất quán, bỏ qua")
-            continue
-
-        logs.append(f"{indent}  => Nhất quán, thêm vào assignment")
-        assignment[var] = value
-
-        # --- Ghi nhận trạng thái cho animation ---
-        states_out.append(_assignment_to_partial_state(assignment))
-        steps_out.append(f"Assign X{var}={value}")
-
-        domains_copy = {k: list(v) for k, v in domains.items()}
-
-        # FORWARD-CHECKING: cập nhật domain
-        removed = _forward_checking_prune(domains, var, value, assignment)
-
-        if removed is not None:
-            domain_info = {k: sorted(domains[k]) for k in range(9) if k not in assignment}
-            logs.append(f"{indent}  Domain sau FC: {domain_info}")
-
-            result = _forward_check_recursive(assignment, domains, variables, logs, call_count, states_out, steps_out)
-            if result is not None:
-                return result
-        else:
-            logs.append(f"{indent}  => FC phát hiện domain rỗng, cắt nhánh")
-
-        # Khôi phục domain
-        for k, v in domains_copy.items():
-            domains[k] = v
-
-        logs.append(f"{indent}  => Backtrack: X{var} = {value}")
-        del assignment[var]
-
-        # --- Ghi nhận trạng thái backtrack cho animation ---
-        states_out.append(_assignment_to_partial_state(assignment))
-        steps_out.append(f"Backtrack X{var}")
-
-    return None
-
-
-def forward_checking_8puzzle(initial_state):
-    """
-    FORWARD-CHECKING-SEARCH cho 8-puzzle.
-    """
+def forward_checking_8puzzle(initial_state, max_depth=50):
     logs = []
     logs.append("=== FORWARD CHECKING SEARCH LOG ===")
-    logs.append("Mô hình CSP:")
-    logs.append("  Variables: X0..X8 (9 ô)")
-    logs.append("  Domain ban đầu: {0,1,2,3,4,5,6,7,8} mỗi biến")
-    logs.append("  Constraints: all-different + kết quả = goal")
-    logs.append(f"  Goal: {goal}")
-    logs.append(f"Initial State: {initial_state}")
-    logs.append("")
-    logs.append("Bắt đầu FORWARD-CHECK({}, csp):")
-
-    variables = list(range(9))
-    domains = {i: list(range(9)) for i in range(9)}
-    assignment = {}
-    call_count = [0]
-
-    states_out = [initial_state]
-    steps_out = []
-
-    result = _forward_check_recursive(assignment, domains, variables, logs, call_count, states_out, steps_out)
-
-    logs.append(f"\nTổng số lần gọi đệ quy: {call_count[0]}")
-
-    if result is not None:
-        state_solution = tuple(result[i] for i in range(9))
-        logs.append(f"\n=> Tìm được assignment: {state_solution}")
-
-        costs_out = [0] * len(states_out)
-        return steps_out, states_out, costs_out, logs
-    else:
-        logs.append("=> FORWARD CHECKING thất bại.")
-        return "failure", [], [], logs
-
+    logs.append("Duyệt không gian trạng thái bằng Forward Checking (DFS với lookahead 1 bước).")
+    
+    for limit in range(1, max_depth + 1):
+        frontier = [Node(initial_state)]
+        result = "failure"
+        while frontier:
+            node = frontier.pop()
+            logs.append(f"\nĐang xét node ở depth = {node.step}")
+            if goal_test(node.state):
+                logs.append("=> Tìm thấy trạng thái đích!")
+                steps, states, costs = solution(node)
+                return steps, states, costs, logs
+                
+            if depth(node) >= limit:
+                result = "cutoff"
+            elif not is_cycle(node):
+                for action in reversed(valid_actions(node.state)):
+                    child = child_node(node, action)
+                    
+                    # Lookahead 1 step
+                    can_move = False
+                    if goal_test(child.state):
+                        can_move = True
+                    else:
+                        for next_action in valid_actions(child.state):
+                            grandchild = child_node(child, next_action)
+                            if not is_cycle(grandchild):
+                                can_move = True
+                                break
+                    
+                    if can_move:
+                        frontier.append(child)
+                    else:
+                        logs.append(f"FC prunes action {action} at depth {node.step}")
+                        
+        if result != "cutoff":
+            break
+            
+    logs.append("=> FORWARD CHECKING thất bại.")
+    return "failure", [], [], logs
 
 # ===================== AC-3 =====================
-# function AC-3(csp) returns the CSP, possibly with reduced domains
-#   queue <- all arcs in csp
-#   while queue is not empty do
-#       (Xi, Xj) <- REMOVE-FIRST(queue)
-#       if RM-INCONSISTENT-VALUES(Xi, Xj) then
-#           for each Xk in NEIGHBORS[Xi] do
-#               add (Xk, Xi) to queue
-#   return csp
-#
-# function RM-INCONSISTENT-VALUES(Xi, Xj)
-#   removed <- false
-#   for each x in DOMAIN[Xi] do
-#       if no value y in DOMAIN[Xj] allows (x,y) to satisfy constraint(Xi,Xj)
-#       then delete x from DOMAIN[Xi]; removed <- true
-#   return removed
-
-def _rm_inconsistent_values(domains, xi, xj, logs):
-    """
-    RM-INCONSISTENT-VALUES cho ràng buộc all-different (Xi != Xj).
-    Loại x khỏi domain[Xi] nếu không tồn tại y trong domain[Xj] mà x != y.
-    """
-    removed = False
-    to_remove = []
-
-    for x in list(domains[xi]):
-        # Kiểm tra có y trong domain[Xj] thỏa x != y không
-        satisfiable = any(y != x for y in domains[xj])
-        if not satisfiable:
-            to_remove.append(x)
-            removed = True
-
-    for x in to_remove:
-        domains[xi].remove(x)
-        logs.append(f"  RM-INCONSISTENT: Loại {x} khỏi domain[X{xi}] (do X{xj} không có giá trị khác)")
-
-    return removed
-
-
-def ac3_8puzzle(initial_state):
-    """
-    AC-3 cho 8-puzzle (mô hình CSP all-different).
-    """
+def ac3_8puzzle(initial_state, max_depth=50):
     logs = []
     logs.append("=== AC-3 SEARCH LOG ===")
-    logs.append("Mô hình CSP:")
-    logs.append("  Variables: X0..X8 (9 ô)")
-    logs.append("  Domain ban đầu: {0,1,2,3,4,5,6,7,8} mỗi biến")
-    logs.append("  Constraints: all-different + unary goal Xi = goal[i]")
-    logs.append(f"  Goal: {goal}")
-    logs.append(f"Initial State: {initial_state}")
-    logs.append("")
-
-    variables = list(range(9))
-    domains = {i: list(range(9)) for i in range(9)}
-
-    # Bước 1: áp dụng ràng buộc unary goal trước khi chạy AC-3.
-    logs.append("Bước 1: Áp dụng ràng buộc goal vào domain")
-    logs.append("  initial_state chỉ là trạng thái bắt đầu animation; domain CSP lấy từ goal.")
-    for pos, val in enumerate(goal):
-        domains[pos] = [val]
-        logs.append(f"  X{pos} phải bằng {val} => domain = [{val}]")
-
-    # Bước 2: Chạy AC-3
-    logs.append("\nBước 2: Chạy AC-3")
-    # Khởi tạo queue: tất cả các cặp cung (Xi, Xj) với i != j
-    queue = deque()
-    for i in variables:
-        for j in variables:
-            if i != j:
-                queue.append((i, j))
-
-    logs.append(f"Queue ban đầu: {len(queue)} cung")
-    arc_count = 0
-
-    while queue:
-        xi, xj = queue.popleft()
-        arc_count += 1
-        logs.append(f"\n[Cung {arc_count}] Xét (X{xi}, X{xj})")
-        logs.append(f"  domain[X{xi}] = {domains[xi]}")
-        logs.append(f"  domain[X{xj}] = {domains[xj]}")
-
-        if _rm_inconsistent_values(domains, xi, xj, logs):
-            if len(domains[xi]) == 0:
-                logs.append(f"  => domain[X{xi}] rỗng! AC-3 phát hiện bất nhất quán.")
-                logs.append("=> AC-3 THẤT BẠI")
-                return "failure", [], [], logs
-
-            # Thêm tất cả (Xk, Xi) với Xk là neighbor của Xi
-            for xk in variables:
-                if xk != xi and xk != xj:
-                    queue.append((xk, xi))
-                    logs.append(f"  Thêm (X{xk}, X{xi}) vào queue")
-
-    logs.append(f"\nAC-3 hoàn tất sau {arc_count} cung.")
-    logs.append("Domain sau AC-3:")
-    for i in variables:
-        logs.append(f"  X{i}: {domains[i]}")
-
-    # Bước 3: Tạo assignment từ domain singleton sau AC-3.
-    if any(len(domains[i]) != 1 for i in variables):
-        logs.append("=> Không thể xác định assignment từ domain.")
-        return "failure", [], [], logs
-
-    state_solution = tuple(domains[i][0] for i in variables)
-    logs.append(f"\nKết quả AC-3: {state_solution}")
-
-    if state_solution != goal:
-        logs.append("=> Domain sau AC-3 không khớp goal.")
-        return "failure", [], [], logs
-
-    logs.append("=> AC-3 hoàn thành: mọi domain là singleton và khớp goal.")
-
-    assignment = {}
-    states_out = [initial_state]
-    steps_out = []
-
-    for var in variables:
-        value = domains[var][0]
-        assignment[var] = value
-        states_out.append(_assignment_to_partial_state(assignment))
-        steps_out.append(f"AC-3 set X{var}={value}")
-
-    costs_out = [0] * len(states_out)
-    return steps_out, states_out, costs_out, logs
+    logs.append("Duyệt không gian trạng thái bằng AC-3 (DFS với lookahead 2 bước / đảm bảo tính nhất quán cung).")
+    
+    for limit in range(1, max_depth + 1):
+        frontier = [Node(initial_state)]
+        result = "failure"
+        while frontier:
+            node = frontier.pop()
+            logs.append(f"\nĐang xét node ở depth = {node.step}")
+            if goal_test(node.state):
+                logs.append("=> Tìm thấy trạng thái đích!")
+                steps, states, costs = solution(node)
+                return steps, states, costs, logs
+                
+            if depth(node) >= limit:
+                result = "cutoff"
+            elif not is_cycle(node):
+                for action in reversed(valid_actions(node.state)):
+                    child = child_node(node, action)
+                    
+                    # Lookahead 2 steps
+                    valid_path_exists = False
+                    if goal_test(child.state):
+                        valid_path_exists = True
+                    else:
+                        for a1 in valid_actions(child.state):
+                            gc1 = child_node(child, a1)
+                            if not is_cycle(gc1):
+                                if goal_test(gc1.state):
+                                    valid_path_exists = True
+                                    break
+                                for a2 in valid_actions(gc1.state):
+                                    gc2 = child_node(gc1, a2)
+                                    if not is_cycle(gc2):
+                                        valid_path_exists = True
+                                        break
+                                if valid_path_exists:
+                                    break
+                                    
+                    if valid_path_exists:
+                        frontier.append(child)
+                    else:
+                        logs.append(f"AC-3 prunes action {action} at depth {node.step}")
+                        
+        if result != "cutoff":
+            break
+            
+    logs.append("=> AC-3 thất bại.")
+    return "failure", [], [], logs
 
 class Node:
     def __init__(self, state, parent=None, action=None, step=0, cost=0):
@@ -2577,22 +2193,7 @@ class EightPuzzleApp:
                 previous_state = self.states[self.index - 1]
                 current_state = self.states[self.index]
 
-                # CSP algorithms: trạng thái chuyển không phải hoán đổi ô trống
-                if algorithm in ["Backtracking", "Forward Checking", "AC-3", "Min-Conflicts"]:
-                    conflicts = _count_conflicts_mc(current_state)
-
-                    self.info.config(
-                        text=f"Step {self.index}/{len(self.steps)} | {move} | Xung đột: {conflicts}"
-                    )
-
-                    self.log_text.insert(
-                        tk.END,
-                        f"Step {self.index} Solution: {move}\n"
-                        f"Số ô xung đột = {conflicts}\n"
-                        f"{format_state(current_state)}\n\n"
-                    )
-
-                elif is_adversarial_algorithm(algorithm):
+                if is_adversarial_algorithm(algorithm):
                     actor = adversarial_actor_for_step(algorithm, self.index)
                     backed_up_value = format_adversarial_value(self.costs[self.index])
                     state_utility = adversarial_utility(current_state)
